@@ -7,7 +7,7 @@ import androidx.compose.material.lightColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// Charte NGoma : rouge en couleur principale (base Wouanda).
+// Charte NGoma : rouge en couleur principale (base NGoma).
 object NColors {
     val Brand = Color(0xFFE0262D)
     val BrandDark = Color(0xFFFF5A5F)

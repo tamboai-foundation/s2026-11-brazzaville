@@ -27,7 +27,7 @@ import java.util.Date
 private enum class Phase { Splash, Auth, Home }
 
 @Composable
-fun NGomaApp(account: AccountBridge, messaging: MessagingBridge) {
+fun NGomaApp(account: AccountBridge, messaging: MessagingBridge, video: VideoBridge) {
     NGomaTheme {
         var phase by remember { mutableStateOf(Phase.Splash) }
         LaunchedEffect(Unit) {
@@ -36,7 +36,7 @@ fun NGomaApp(account: AccountBridge, messaging: MessagingBridge) {
         when (phase) {
             Phase.Splash -> SplashScreen()
             Phase.Auth -> AuthScreen(account) { phase = Phase.Home }
-            Phase.Home -> HomeScreen(account, messaging) { phase = Phase.Auth }
+            Phase.Home -> NGomaShell(account, messaging, video) { phase = Phase.Auth }
         }
     }
 }
@@ -101,7 +101,10 @@ fun AuthScreen(account: AccountBridge, onDone: () -> Unit) {
 private enum class Filter(val label: String) { All("Toutes"), Unread("Non lues"), Pinned("Épinglées"), Archived("Archivées") }
 
 @Composable
-fun HomeScreen(account: AccountBridge, messaging: MessagingBridge, onLogout: () -> Unit) {
+fun HomeScreen(
+    account: AccountBridge, messaging: MessagingBridge, onLogout: () -> Unit,
+    openChatWith: String? = null, onChatOpened: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val user by account.user.collectAsState()
     val convs by messaging.conversations.collectAsState()
@@ -109,6 +112,14 @@ fun HomeScreen(account: AccountBridge, messaging: MessagingBridge, onLogout: () 
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(Filter.All) }
     var newDialog by remember { mutableStateOf(false) }
+
+    // « Écrire un message » depuis l'écran Personnes : ouvre la conversation de cette personne (la crée si besoin).
+    LaunchedEffect(openChatWith) {
+        if (openChatWith != null) {
+            selected = convs.firstOrNull { it.title == openChatWith }?.id ?: messaging.createConversation(openChatWith)
+            onChatOpened()
+        }
+    }
 
     val shown = convs
         .filter { c ->
@@ -191,7 +202,7 @@ fun HomeScreen(account: AccountBridge, messaging: MessagingBridge, onLogout: () 
 }
 
 @Composable
-private fun Avatar(name: String, size: Int) {
+internal fun Avatar(name: String, size: Int) {
     Box(
         Modifier.size(size.dp).clip(CircleShape).background(NColors.Brand100),
         contentAlignment = Alignment.Center,
@@ -200,7 +211,7 @@ private fun Avatar(name: String, size: Int) {
     }
 }
 
-private fun hour(t: Long): String = SimpleDateFormat("HH:mm").format(Date(t))
+internal fun hour(t: Long): String = SimpleDateFormat("HH:mm").format(Date(t))
 
 @Composable
 private fun ConversationRow(c: Conversation, messaging: MessagingBridge, selected: Boolean, onClick: () -> Unit) {
