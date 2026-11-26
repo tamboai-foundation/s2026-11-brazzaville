@@ -24,3 +24,5 @@ Les écrans ne changent pas : votre travail est de **concevoir vos modèles TMod
 - `co.tamboai:TModeler:1.0.1` (Maven Central).
 - Init : `NGomaTm.kt` (`DB_VERSION` : l'incrémenter repart d'une base vide).
 - Exemple de modèle : `models/Note.kt`.
+
+- Test Git : Papa Ibrahima SAMB
