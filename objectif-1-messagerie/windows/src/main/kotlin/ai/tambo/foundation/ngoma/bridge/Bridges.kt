@@ -4,7 +4,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-data class User(val id: Int, val name: String)
+data class User(val id: Int, val name: String, val bio: String = "", val joinedAt: Long = 0L)
 
 data class Message(
     val id: Long,
@@ -34,6 +34,52 @@ interface AccountBridge {
     suspend fun login(identifier: String, password: String): User
     suspend fun register(name: String, identifier: String, password: String): User
     suspend fun logout()
+
+    // Gestion des utilisateurs (M1 SI, module 1) : voir les users, rechercher, modifier son profil, supprimer son compte.
+    val users: StateFlow<List<User>>
+    fun updateProfile(name: String, bio: String)
+    suspend fun deleteAccount()
+}
+
+/** Publication (M1 SI, module 3) : média facultatif (photo ou vidéo) et légende. `mediaPath` vide : légende seule, affichée sur une carte colorée. */
+data class Post(
+    val id: Long,
+    val authorId: Int,
+    val caption: String,
+    val mediaPath: String,
+    val time: Long,
+    val edited: Boolean = false,
+    /** Identifiants des utilisateurs qui ont aimé la publication. */
+    val likes: Set<Int> = emptySet(),
+)
+
+data class PostComment(
+    val id: Long,
+    val postId: Long,
+    val authorId: Int,
+    val text: String,
+    val time: Long,
+    /** Réponse à un commentaire : identifiant du commentaire parent (un seul niveau dans l'interface). */
+    val parentId: Long? = null,
+    val edited: Boolean = false,
+    val deleted: Boolean = false,
+    val likes: Set<Int> = emptySet(),
+)
+
+/** Interface UI <-> TModeler pour les vidéos, likes, commentaires et réponses. Remplacer le mock par une implémentation TModeler. */
+interface VideoBridge {
+    /** Fil d'actualité : toutes les publications, la plus récente en premier. */
+    val posts: StateFlow<List<Post>>
+    fun comments(postId: Long): StateFlow<List<PostComment>>
+    fun publish(caption: String, mediaPath: String?): Post
+    fun editPost(postId: Long, caption: String)
+    fun removePost(postId: Long)
+    /** Aime ou n'aime plus (bascule) pour l'utilisateur connecté. */
+    fun toggleLike(postId: Long)
+    fun addComment(postId: Long, text: String, parentId: Long? = null)
+    fun editComment(commentId: Long, text: String)
+    fun removeComment(commentId: Long)
+    fun toggleCommentLike(commentId: Long)
 }
 
 /** Interface UI <-> TModeler pour la messagerie. Remplacer le mock par une implémentation TModeler. */
@@ -56,6 +102,22 @@ class AccountBridgeMock : AccountBridge {
     private val state = MutableStateFlow<User?>(null)
     override val user: StateFlow<User?> = state
 
+    private val others = listOf(
+        User(2, "Awa Traoré", "Développeuse mobile, Bamako.", System.currentTimeMillis() - 30 * 86_400_000L),
+        User(3, "Kofi Mensah", "Design et vidéo, Accra.", System.currentTimeMillis() - 20 * 86_400_000L),
+        User(4, "Fatou Diop", "Étudiante en informatique, Dakar.", System.currentTimeMillis() - 12 * 86_400_000L),
+        User(5, "Moussa Keita", "Cybersécurité.", System.currentTimeMillis() - 5 * 86_400_000L),
+        User(6, "Aïcha Bello", "Passionnée de musique et de code.", System.currentTimeMillis() - 2 * 86_400_000L),
+    )
+    private val all = MutableStateFlow(others)
+    override val users: StateFlow<List<User>> = all
+
+    private fun open(user: User): User {
+        state.value = user
+        all.value = listOf(user) + others
+        return user
+    }
+
     override suspend fun restoreSession(): User? {
         delay(1200)
         return state.value
@@ -63,17 +125,99 @@ class AccountBridgeMock : AccountBridge {
 
     override suspend fun login(identifier: String, password: String): User {
         delay(500)
-        return User(1, identifier.ifBlank { "Moi" }).also { state.value = it }
+        return open(User(1, identifier.ifBlank { "Moi" }, "", System.currentTimeMillis()))
     }
 
     override suspend fun register(name: String, identifier: String, password: String): User {
         delay(500)
-        return User(1, name.ifBlank { "Moi" }).also { state.value = it }
+        return open(User(1, name.ifBlank { "Moi" }, "", System.currentTimeMillis()))
     }
 
     override suspend fun logout() {
         state.value = null
+        all.value = others
     }
+
+    override fun updateProfile(name: String, bio: String) {
+        val me = state.value ?: return
+        open(me.copy(name = name.trim().ifBlank { me.name }, bio = bio.trim()))
+    }
+
+    override suspend fun deleteAccount() = logout()
+}
+
+class VideoBridgeMock : VideoBridge {
+    private val me = 1
+    private var nextId = 1000L
+    private val feed = MutableStateFlow<List<Post>>(emptyList())
+    override val posts: StateFlow<List<Post>> = feed
+    private val notes = MutableStateFlow<List<PostComment>>(emptyList())
+    private val perPost = HashMap<Long, MutableStateFlow<List<PostComment>>>()
+
+    init {
+        val now = System.currentTimeMillis()
+        fun post(author: Int, caption: String, ago: Long, likes: Set<Int>) =
+            Post(nextId++, author, caption, "", now - ago, likes = likes)
+        feed.value = listOf(
+            post(2, "Ma première application de messagerie, étape par étape ✨", 3_600_000, setOf(3, 4, 5)),
+            post(3, "Un petit tour dans les coulisses de notre équipe 🎬", 7_200_000, setOf(2)),
+            post(4, "Astuce du jour : tester chaque écran avant de le montrer.", 20_000_000, setOf(2, 3, 5, 6)),
+            post(5, "Pourquoi on chiffre les messages ? Explication en 30 secondes.", 90_000_000, emptySet()),
+            post(6, "Bienvenue sur NGoma 👋", 180_000_000, setOf(2, 3)),
+        )
+        val first = feed.value.first().id
+        val c1 = nextId++
+        notes.value = listOf(
+            PostComment(c1, first, 3, "Bravo, très clair !", now - 3_000_000),
+            PostComment(nextId++, first, 4, "Merci pour le partage 🙏", now - 2_800_000),
+            PostComment(nextId++, first, 2, "Merci Kofi !", now - 2_500_000, parentId = c1),
+        )
+    }
+
+    private fun flowOf(postId: Long) = perPost.getOrPut(postId) { MutableStateFlow(emptyList()) }
+
+    override fun comments(postId: Long): StateFlow<List<PostComment>> = flowOf(postId).also {
+        it.value = notes.value.filter { c -> c.postId == postId }.sortedBy { c -> c.time }
+    }
+
+    private fun refresh(postId: Long) {
+        flowOf(postId).value = notes.value.filter { it.postId == postId }.sortedBy { it.time }
+    }
+
+    override fun publish(caption: String, mediaPath: String?): Post {
+        val post = Post(nextId++, me, caption.trim(), mediaPath ?: "", System.currentTimeMillis())
+        feed.value = listOf(post) + feed.value
+        return post
+    }
+
+    private fun patch(id: Long, f: (Post) -> Post) {
+        feed.value = feed.value.map { if (it.id == id) f(it) else it }
+    }
+
+    override fun editPost(postId: Long, caption: String) = patch(postId) { it.copy(caption = caption.trim(), edited = true) }
+
+    override fun removePost(postId: Long) {
+        feed.value = feed.value.filter { it.id != postId }
+        notes.value = notes.value.filter { it.postId != postId }
+    }
+
+    override fun toggleLike(postId: Long) = patch(postId) { it.copy(likes = if (me in it.likes) it.likes - me else it.likes + me) }
+
+    override fun addComment(postId: Long, text: String, parentId: Long?) {
+        notes.value = notes.value + PostComment(nextId++, postId, me, text.trim(), System.currentTimeMillis(), parentId)
+        refresh(postId)
+    }
+
+    private fun patchNote(id: Long, f: (PostComment) -> PostComment) {
+        val postId = notes.value.firstOrNull { it.id == id }?.postId ?: return
+        notes.value = notes.value.map { if (it.id == id) f(it) else it }
+        refresh(postId)
+    }
+
+    override fun editComment(commentId: Long, text: String) = patchNote(commentId) { it.copy(text = text.trim(), edited = true) }
+    override fun removeComment(commentId: Long) = patchNote(commentId) { it.copy(deleted = true, text = "") }
+    override fun toggleCommentLike(commentId: Long) =
+        patchNote(commentId) { it.copy(likes = if (me in it.likes) it.likes - me else it.likes + me) }
 }
 
 class MessagingBridgeMock : MessagingBridge {
